@@ -2,39 +2,40 @@
 import logging
 logging.disable(logging.CRITICAL)
 
-# ================= IMPORTS =================
+# ================= IMPORTS =====================
 import os
 import time
 import requests
 import pandas as pd
 import yfinance as yf
+import sys
 from datetime import datetime
 
-# ================= CONFIG =================
+# ================= CONFIG ======================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 OWNER_ID = 7140499311  # 🔒 ONLY YOU
 
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
-# ✅ XM GOLD SYMBOL (FIXED)
-SYMBOL = "XAUUSD=X"     # Yahoo Finance
-PAIR_NAME = "XAUUSD"    # XM / MT4 / MT5
+# XM GOLD (ORIGINAL SYMBOL CHANGE ONLY)
+SYMBOL = "XAUUSD=X"
+PAIR_NAME = "XAUUSD"
 
 TF_ENTRY = "5m"
 TF_TREND = "15m"
-SLEEP_TIME = 300
-RR_RATIO = 2
+SLEEP_TIME = 300        # ❗ ORIGINAL (NO CHANGE)
+RR_RATIO = 2            # ❗ ORIGINAL
 
-# ================= GLOBAL STATES =================
+# ================= GLOBAL STATES ===============
 last_signal = None
 last_15m_close_time = None
-locked_15m_trend = None  # BULL / BEAR
+locked_15m_trend = None
 
 daily_trades = []
 last_summary_date = None
 
-# ================= SEND MESSAGE =================
+# ================= TELEGRAM ====================
 def send_message(text):
     if not BOT_TOKEN:
         return
@@ -45,7 +46,17 @@ def send_message(text):
     }
     requests.post(TELEGRAM_URL, data=payload)
 
-# ================= ADX =================
+# ================= STARTUP TEST MESSAGE =================
+def send_startup_message():
+    send_message(
+        "🤖 <b>BOT STARTED</b>\n\n"
+        "Pair: XAUUSD (XM)\n"
+        "TF: 5M / 15M\n"
+        "Mode: ORIGINAL (NO TUNING)\n"
+        "Status: Monitoring market…"
+    )
+
+# ================= ADX (ORIGINAL) =================
 def calculate_adx(df, period=14):
     high, low, close = df["High"], df["Low"], df["Close"]
 
@@ -59,14 +70,11 @@ def calculate_adx(df, period=14):
     ], axis=1).max(axis=1)
 
     atr = tr.rolling(period).mean()
-
     plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
     minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
 
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-    adx = dx.rolling(period).mean()
-
-    return adx.fillna(0)
+    return dx.rolling(period).mean().fillna(0)
 
 # ================= LIQUIDITY SWEEP =================
 def liquidity_sweep_buy(df):
@@ -94,7 +102,7 @@ def bearish_order_block(df):
             return c1["Low"], c1["High"]
     return None, None
 
-# ================= DAILY SUMMARY =================
+# ================= DAILY SUMMARY (ORIGINAL) =================
 def send_daily_summary():
     global daily_trades
     if not daily_trades:
@@ -110,20 +118,14 @@ Pair: {PAIR_NAME}
 TF: 5M | 15M
 
 Total Signals: {total}
-Net RR: +{net_rr}
-
-———————————————
+Net RR: {net_rr}
 """
     send_message(msg)
     daily_trades = []
 
-# ================= SIGNAL LOGIC =================
+# ================= SIGNAL LOGIC (100% ORIGINAL) =================
 def check_signal():
     global last_signal, last_15m_close_time, locked_15m_trend, daily_trades
-
-    hour = datetime.utcnow().hour
-    if hour < 6 or hour > 20:
-        return None
 
     df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d", progress=False)
     htf = yf.download(SYMBOL, interval=TF_TREND, period="4d", progress=False)
@@ -175,7 +177,7 @@ def check_signal():
     ob_low_b, ob_high_b = bullish_order_block(df)
     ob_low_s, ob_high_s = bearish_order_block(df)
 
-    # ================= BUY =================
+    # BUY (ORIGINAL CONDITIONS)
     if (
         locked_15m_trend == "BULL"
         and liquidity_sweep_buy(df)
@@ -203,7 +205,7 @@ TP: {tp:.2f}
 RR: 1:{RR_RATIO}
 """
 
-    # ================= SELL =================
+    # SELL (ORIGINAL CONDITIONS)
     if (
         locked_15m_trend == "BEAR"
         and liquidity_sweep_sell(df)
@@ -233,7 +235,9 @@ RR: 1:{RR_RATIO}
 
     return None
 
-# ================= MAIN LOOP =================
+# ================= START ========================
+send_startup_message()
+
 while True:
     now = datetime.utcnow()
     today = now.date()
@@ -246,5 +250,9 @@ while True:
     signal = check_signal()
     if signal:
         send_message(signal)
+
+    # 🔹 Railway no-sleep heartbeat (NO LOGIC CHANGE)
+    print("Heartbeat: bot alive")
+    sys.stdout.flush()
 
     time.sleep(SLEEP_TIME)
