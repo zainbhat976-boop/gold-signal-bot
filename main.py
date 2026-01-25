@@ -38,11 +38,11 @@ def check_signal():
     rs = gain / loss
     data["RSI"] = 100 - (100 / (1 + rs))
 
-    last = data.iloc[-1]
+    last = data.tail(1)
 
-    ema20 = float(last["EMA20"])
-    ema50 = float(last["EMA50"])
-    rsi = float(last["RSI"])
+ema20 = float(last["EMA20"].values[0])
+ema50 = float(last["EMA50"].values[0])
+rsi = float(last["RSI"].values[0])
 
     if pd.isna(ema20) or pd.isna(ema50) or pd.isna(rsi):
         return None
