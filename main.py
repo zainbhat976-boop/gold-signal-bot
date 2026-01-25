@@ -33,13 +33,20 @@ def check_signal():
 
     last = data.iloc[-1]
 
-    if last["EMA20"] > last["EMA50"] and last["RSI"] > 55:
-        return "📈 BUY XAUUSD\nEMA bullish + RSI strong"
+ema20 = float(last["EMA20"])
+ema50 = float(last["EMA50"])
+rsi = float(last["RSI"])
 
-    elif last["EMA20"] < last["EMA50"] and last["RSI"] < 45:
-        return "📉 SELL XAUUSD\nEMA bearish + RSI weak"
-
+if pd.isna(ema20) or pd.isna(ema50) or pd.isna(rsi):
     return None
+
+if ema20 > ema50 and rsi > 55:
+    return "📈 BUY XAUUSD\nEMA bullish + RSI strong"
+
+elif ema20 < ema50 and rsi < 45:
+    return "📉 SELL XAUUSD\nEMA bearish + RSI weak"
+
+return None
 
 def main():
     send_message("🤖 Gold Signal Bot Started Successfully")
