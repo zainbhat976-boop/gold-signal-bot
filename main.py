@@ -1,3 +1,28 @@
+import os
+import time
+import requests
+import pandas as pd
+import yfinance as yf
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+
+TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+
+
+def send_message(text):
+    if not BOT_TOKEN or not CHAT_ID:
+        print("BOT_TOKEN or CHAT_ID missing")
+        return
+
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    requests.post(TELEGRAM_URL, data=payload)
+
+
 def check_signal():
     data = yf.download("PAXG-USD", interval="5m", period="1d")
 
@@ -23,9 +48,31 @@ def check_signal():
         return None
 
     if ema20 > ema50 and rsi > 55:
-        return "📈 BUY XAUUSD\nEMA bullish + RSI strong"
+        return "📈 <b>BUY XAUUSD</b>\nEMA bullish + RSI strong"
 
-    elif ema20 < ema50 and rsi < 45:
-        return "📉 SELL XAUUSD\nEMA bearish + RSI weak"
+    if ema20 < ema50 and rsi < 45:
+        return "📉 <b>SELL XAUUSD</b>\nEMA bearish + RSI weak"
 
     return None
+
+
+def main():
+    send_message("🤖 Gold Signal Bot Started Successfully")
+    send_message("✅ TEST MESSAGE: Bot connected & running")
+
+    last_signal = None
+
+    while True:
+        try:
+            signal = check_signal()
+            if signal and signal != last_signal:
+                send_message(signal)
+                last_signal = signal
+        except Exception as e:
+            print("Error:", e)
+
+        time.sleep(300)  # 5 minutes
+
+
+if __name__ == "__main__":
+    main()
