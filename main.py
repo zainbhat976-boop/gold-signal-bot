@@ -40,9 +40,9 @@ def check_signal():
 
     last = data.tail(1)
 
-ema20 = float(last["EMA20"].values[0])
-ema50 = float(last["EMA50"].values[0])
-rsi = float(last["RSI"].values[0])
+    ema20 = float(last["EMA20"].values[0])
+    ema50 = float(last["EMA50"].values[0])
+    rsi = float(last["RSI"].values[0])
 
     if pd.isna(ema20) or pd.isna(ema50) or pd.isna(rsi):
         return None
@@ -71,7 +71,7 @@ def main():
         except Exception as e:
             print("Error:", e)
 
-        time.sleep(300)  # 5 minutes
+        time.sleep(300)
 
 
 if __name__ == "__main__":
