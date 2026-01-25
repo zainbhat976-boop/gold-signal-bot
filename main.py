@@ -37,20 +37,20 @@ def send_message(text):
         return
 
     payload = {
-        "chat_id": OWNER_ID,   # 🔒 ONLY THIS ID WILL RECEIVE MESSAGE
+        "chat_id": OWNER_ID,
         "text": text,
         "parse_mode": "HTML"
     }
     requests.post(TELEGRAM_URL, data=payload)
 
-# ================= ADX =================
+# ================= ADX (FIXED – NO ERROR) =================
 def calculate_adx(df, period=14):
-    high, low, close = df["High"], df["Low"], df["Close"]
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
 
     plus_dm = high.diff()
-    minus_dm = -low.diff()
-    plus_dm[plus_dm < 0] = 0
-    minus_dm[minus_dm < 0] = 0
+    minus_dm = low.diff().abs()
 
     tr = pd.concat([
         high - low,
@@ -59,10 +59,14 @@ def calculate_adx(df, period=14):
     ], axis=1).max(axis=1)
 
     atr = tr.rolling(period).mean()
+
     plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
     minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
+
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-    return dx.rolling(period).mean()
+    adx = dx.rolling(period).mean()
+
+    return adx.fillna(0)   # 🔥 THIS LINE FIXES RAILWAY ERROR
 
 # ================= LIQUIDITY SWEEP =================
 def liquidity_sweep_buy(df):
@@ -110,8 +114,7 @@ def send_daily_summary():
         f"⚖ Net RR (Approx): +{net_rr}R\n\n"
         f"💼 Pair: GOLD\n"
         f"⏱ TF: 5M | 15M\n"
-        f"━━━━━━━━━━━━━━━━\n"
-        f"⚠️ For educational use only"
+        f"━━━━━━━━━━━━━━━━"
     )
 
     send_message(msg)
@@ -121,7 +124,7 @@ def send_daily_summary():
 def check_signal():
     global last_signal, last_15m_close_time, locked_15m_trend, daily_trades
 
-    # ---- Session filter (London + NY) ----
+    # ---- Session filter ----
     hour = datetime.utcnow().hour
     if hour < 6 or hour > 20:
         return None
@@ -151,10 +154,10 @@ def check_signal():
     rs_h = gain_h / loss_h
     htf["RSI"] = 100 - (100 / (1 + rs_h))
 
-    # ---- ADX ----
+    # ---- ADX (FIXED) ----
     df["ADX"] = calculate_adx(df)
 
-    # ---- 15M candle CLOSE lock ----
+    # ---- 15M candle close lock ----
     current_15m_close = htf.index[-1]
     if last_15m_close_time != current_15m_close:
         last_15m_close_time = current_15m_close
@@ -193,13 +196,7 @@ def check_signal():
         tp = price + (price - swing_low) * RR_RATIO
         daily_trades.append({"rr": RR_RATIO})
 
-        return (
-            f"🟢 <b>GOLD BUY SIGNAL</b>\n\n"
-            f"Entry: {price:.2f}\n"
-            f"SL: {swing_low:.2f}\n"
-            f"TP: {tp:.2f}\n\n"
-            f"RR 1:{RR_RATIO} | TF 5M / 15M"
-        )
+        return f"🟢 BUY GOLD\nEntry: {price:.2f}\nSL: {swing_low:.2f}\nTP: {tp:.2f}"
 
     # ================= SELL =================
     if (
@@ -216,13 +213,7 @@ def check_signal():
         tp = price - (swing_high - price) * RR_RATIO
         daily_trades.append({"rr": RR_RATIO})
 
-        return (
-            f"🔴 <b>GOLD SELL SIGNAL</b>\n\n"
-            f"Entry: {price:.2f}\n"
-            f"SL: {swing_high:.2f}\n"
-            f"TP: {tp:.2f}\n\n"
-            f"RR 1:{RR_RATIO} | TF 5M / 15M"
-        )
+        return f"🔴 SELL GOLD\nEntry: {price:.2f}\nSL: {swing_high:.2f}\nTP: {tp:.2f}"
 
     return None
 
@@ -231,7 +222,7 @@ while True:
     now = datetime.utcnow()
     today = now.date()
 
-    # ---- Daily summary (18:30 UTC ≈ 11:59 PM IST) ----
+    # ---- Daily summary at 18:30 UTC ----
     if now.hour == 18 and now.minute == 30:
         if last_summary_date != today:
             send_daily_summary()
