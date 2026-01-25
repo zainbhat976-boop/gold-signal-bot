@@ -17,7 +17,7 @@ def send_message(text):
     requests.post(url, data=payload)
 
 def check_signal():
-    data = yf.download("XAUUSD=X", interval="5m", period="1d")
+    data = yf.download("GC=F", interval="5m", period="1d")
 
     if data.empty:
         return None
