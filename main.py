@@ -21,7 +21,7 @@ PAIR_NAME = "XAUUSD"
 
 TF_ENTRY = "5m"
 TF_TREND = "15m"
-SLEEP_TIME = 30
+SLEEP_TIME = 300
 RR_RATIO = 2
 
 # ================= DAILY SIGNAL LIMIT =================
