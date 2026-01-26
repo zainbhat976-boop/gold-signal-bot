@@ -1,4 +1,4 @@
-# ================= LOGGING OFF =================
+# ================= HARD SECURITY MODE =================
 import logging
 logging.disable(logging.CRITICAL)
 
@@ -8,14 +8,21 @@ import time
 import requests
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timezone
+from datetime import datetime
+
+# ================= TOKEN PROTECTION =================
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+def _valid_token(t):
+    return isinstance(t, str) and ":" in t and len(t) > 30
+
+if not _valid_token(BOT_TOKEN):
+    raise SystemExit("BOT_TOKEN invalid or missing")
 
 # ================= CONFIG =================
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-OWNER_ID = 7140499311  # 🔒 ONLY YOU
+OWNER_ID = 7140499311  # 🔒 HARD OWNER
 
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-UPDATES_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
 
 SYMBOL = "XAUUSD=X"
 PAIR_NAME = "XAUUSD"
@@ -24,60 +31,32 @@ TF_ENTRY = "5m"
 TF_TREND = "15m"
 SLEEP_TIME = 300
 RR_RATIO = 2
+
+# 🔢 DAILY SIGNAL LIMIT
 MAX_SIGNALS_PER_DAY = 10
+signals_today = 0
+signals_date = None
 
 # ================= GLOBAL STATES =================
 last_signal = None
 last_15m_close_time = None
 locked_15m_trend = None
-signals_today = 0
-last_signal_date = None
-LAST_UPDATE_ID = 0
 
-# ================= TELEGRAM =================
+daily_trades = []
+last_summary_date = None
+
+# ================= SAFE TELEGRAM SEND =================
 def send_message(text):
-    if not BOT_TOKEN:
-        return
-    payload = {
-        "chat_id": OWNER_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    requests.post(TELEGRAM_URL, data=payload, timeout=10)
-
-# ================= STARTUP MESSAGE =================
-def send_startup_message():
-    send_message("🤖 Gold Signal Bot Started Successfully")
-
-# ================= OWNER-ONLY /START =================
-def check_start_command():
-    global LAST_UPDATE_ID
     try:
-        params = {"offset": LAST_UPDATE_ID + 1, "timeout": 10}
-        r = requests.get(UPDATES_URL, params=params, timeout=15).json()
-
-        for upd in r.get("result", []):
-            LAST_UPDATE_ID = upd["update_id"]
-
-            if "message" not in upd:
-                continue
-
-            msg = upd["message"]
-            text = msg.get("text", "")
-            chat_id = msg["chat"]["id"]
-
-            # 🔒 OWNER ONLY
-            if chat_id != OWNER_ID:
-                continue
-
-            if text == "/start":
-                send_message(
-                    "🤖 <b>Gold Signal Bot ACTIVE</b>\n\n"
-                    "📊 Pair: XAUUSD\n"
-                    "⏱ TF: 5M | Trend: 15M\n"
-                    "📌 Max Signals/Day: 10\n\n"
-                    "✅ Bot is running"
-                )
+        requests.post(
+            TELEGRAM_URL,
+            data={
+                "chat_id": OWNER_ID,
+                "text": text,
+                "parse_mode": "HTML"
+            },
+            timeout=8
+        )
     except:
         pass
 
@@ -96,6 +75,7 @@ def calculate_adx(df, period=14):
     atr = tr.rolling(period).mean()
     plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
     minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
+
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
     return dx.rolling(period).mean().fillna(0)
 
@@ -125,36 +105,57 @@ def bearish_order_block(df):
             return c1["Low"], c1["High"]
     return None, None
 
-# ================= SIGNAL LOGIC (UNCHANGED) =================
+# ================= DAILY SUMMARY =================
+def send_daily_summary():
+    global daily_trades
+    if not daily_trades:
+        return
+
+    msg = f"""
+📊 <b>DAILY SUMMARY (XM)</b>
+
+Pair: {PAIR_NAME}
+Total Signals: {len(daily_trades)}
+Net RR: {sum(t["rr"] for t in daily_trades)}
+"""
+    send_message(msg)
+    daily_trades = []
+
+# ================= SIGNAL LOGIC =================
 def check_signal():
     global last_signal, last_15m_close_time, locked_15m_trend
-    global signals_today, last_signal_date
+    global signals_today, signals_date, daily_trades
 
-    now = datetime.now(timezone.utc)
-    today = now.date()
-    hour = now.hour
+    # ⏰ HARD TRADING HOURS LOCK (06–20 UTC)
+    hour = datetime.utcnow().hour
+    if hour < 6 or hour > 20:
+        return None
 
-    if last_signal_date != today:
+    # 🔢 Reset daily counter
+    today = datetime.utcnow().date()
+    if signals_date != today:
+        signals_date = today
         signals_today = 0
-        last_signal_date = today
 
     if signals_today >= MAX_SIGNALS_PER_DAY:
         return None
 
-    if hour < 6 or hour > 20:
+    try:
+        df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d", progress=False)
+        htf = yf.download(SYMBOL, interval=TF_TREND, period="4d", progress=False)
+    except:
         return None
-
-    df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d", progress=False)
-    htf = yf.download(SYMBOL, interval=TF_TREND, period="4d", progress=False)
 
     if df.empty or htf.empty or len(df) < 50:
         return None
 
+    # EMA
     df["EMA20"] = df["Close"].ewm(span=20).mean()
     df["EMA50"] = df["Close"].ewm(span=50).mean()
     htf["EMA20"] = htf["Close"].ewm(span=20).mean()
     htf["EMA50"] = htf["Close"].ewm(span=50).mean()
 
+    # RSI
     delta = df["Close"].diff()
     gain = delta.where(delta > 0, 0).rolling(14).mean()
     loss = -delta.where(delta < 0, 0).rolling(14).mean()
@@ -167,10 +168,11 @@ def check_signal():
 
     df["ADX"] = calculate_adx(df)
 
-    current_15m_close = htf.index[-1]
-    if last_15m_close_time != current_15m_close:
-        last_15m_close_time = current_15m_close
+    # 🔒 15M TREND LOCK
+    if last_15m_close_time != htf.index[-1]:
+        last_15m_close_time = htf.index[-1]
         last_htf = htf.iloc[-1]
+
         if last_htf["EMA20"] > last_htf["EMA50"] and last_htf["RSI"] > 50:
             locked_15m_trend = "BULL"
         elif last_htf["EMA20"] < last_htf["EMA50"] and last_htf["RSI"] < 50:
@@ -189,6 +191,7 @@ def check_signal():
     ob_low_b, ob_high_b = bullish_order_block(df)
     ob_low_s, ob_high_s = bearish_order_block(df)
 
+    # 🟢 BUY
     if (
         locked_15m_trend == "BULL"
         and liquidity_sweep_buy(df)
@@ -201,9 +204,19 @@ def check_signal():
     ):
         last_signal = "BUY"
         signals_today += 1
-        tp = price + (price - swing_low) * RR_RATIO
-        return f"🟢 BUY GOLD\nEntry: {price:.2f}\nSL: {swing_low:.2f}\nTP: {tp:.2f}\nRR 1:{RR_RATIO}"
+        daily_trades.append({"rr": RR_RATIO})
 
+        tp = price + (price - swing_low) * RR_RATIO
+        return f"""
+🟢 <b>BUY GOLD (XM)</b>
+Entry: {price:.2f}
+SL: {swing_low:.2f}
+TP: {tp:.2f}
+RR: 1:{RR_RATIO}
+Signals Today: {signals_today}/10
+"""
+
+    # 🔴 SELL
     if (
         locked_15m_trend == "BEAR"
         and liquidity_sweep_sell(df)
@@ -216,23 +229,36 @@ def check_signal():
     ):
         last_signal = "SELL"
         signals_today += 1
+        daily_trades.append({"rr": RR_RATIO})
+
         tp = price - (swing_high - price) * RR_RATIO
-        return f"🔴 SELL GOLD\nEntry: {price:.2f}\nSL: {swing_high:.2f}\nTP: {tp:.2f}\nRR 1:{RR_RATIO}"
+        return f"""
+🔴 <b>SELL GOLD (XM)</b>
+Entry: {price:.2f}
+SL: {swing_high:.2f}
+TP: {tp:.2f}
+RR: 1:{RR_RATIO}
+Signals Today: {signals_today}/10
+"""
 
     return None
 
 # ================= MAIN LOOP =================
-print("Bot started")
-
-# 🔔 One-time startup message
-send_startup_message()
+send_message("✅ Gold Signal Bot LIVE | Best Mode (06–20 UTC)")
 
 while True:
-    # OWNER-only /start listener
-    check_start_command()
+    try:
+        now = datetime.utcnow()
+        if now.hour == 18 and now.minute == 30:
+            if last_summary_date != now.date():
+                send_daily_summary()
+                last_summary_date = now.date()
 
-    signal = check_signal()
-    if signal:
-        send_message(signal)
+        signal = check_signal()
+        if signal:
+            send_message(signal)
 
-    time.sleep(SLEEP_TIME)
+        time.sleep(SLEEP_TIME)
+
+    except:
+        time.sleep(10)
