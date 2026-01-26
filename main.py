@@ -36,6 +36,9 @@ locked_15m_trend = None
 daily_trades = []
 last_summary_date = None
 
+# 🔒 MANUAL SIGNAL STATE (NEW – SAFE)
+last_update_id = 0
+
 # ================= SEND MESSAGE =================
 def send_message(text):
     if not BOT_TOKEN:
@@ -53,9 +56,11 @@ print("🚀 BOT STARTED SUCCESSFULLY ON RAILWAY")
 send_message("✅ Bot online & running on Railway")
 
 # ======================================================
-# 🔥 NEW ADDITION (ONLY THIS PART IS NEW – SAFE)
+# 🔥 MANUAL TEXT SIGNAL (FIXED – NO DUPLICATE)
 # ======================================================
 def fetch_manual_text_signal():
+    global last_update_id
+
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
         r = requests.get(url, timeout=10).json()
@@ -64,6 +69,14 @@ def fetch_manual_text_signal():
             return
 
         for update in r["result"]:
+            update_id = update["update_id"]
+
+            # ❌ ignore already processed messages
+            if update_id <= last_update_id:
+                continue
+
+            last_update_id = update_id  # ✅ mark processed
+
             if "message" not in update:
                 continue
 
@@ -71,11 +84,11 @@ def fetch_manual_text_signal():
             chat_id = msg["chat"]["id"]
             text = msg.get("text", "")
 
-            # ONLY OWNER CAN SEND
+            # ONLY OWNER
             if chat_id != OWNER_ID:
                 continue
 
-            # ONLY BUY / SELL TEXT
+            # ONLY BUY / SELL
             if text.upper().startswith(("BUY", "SELL")):
                 send_message(f"""
 📊 <b>MANUAL SIGNAL</b>
@@ -87,7 +100,6 @@ def fetch_manual_text_signal():
 
     except Exception:
         pass
-# ======================================================
 
 # ================= ADX =================
 def calculate_adx(df, period=14):
@@ -272,7 +284,7 @@ while True:
 
     print(f"⏳ Bot alive | {now}")
 
-    fetch_manual_text_signal()  # ✅ ONLY NEW LINE
+    fetch_manual_text_signal()  # ✅ SAFE
 
     if now.hour == 18 and now.minute == 30:
         if last_summary_date != today:
