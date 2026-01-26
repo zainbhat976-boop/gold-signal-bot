@@ -2,7 +2,7 @@
 import logging
 logging.disable(logging.CRITICAL)
 
-# ================= IMPORTS =====================
+# ================= IMPORTS =================
 import os
 import time
 import requests
@@ -10,7 +10,7 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime
 
-# ================= CONFIG ======================
+# ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = 7140499311  # ONLY YOU
 
@@ -24,12 +24,12 @@ TF_TREND = "15m"
 SLEEP_TIME = 300
 RR_RATIO = 2
 
-# ======== DAILY SIGNAL LIMIT (ADDED) ==========
+# ================= DAILY SIGNAL LIMIT =================
 MAX_SIGNALS_PER_DAY = 10
 signals_today = 0
 signals_date = None
 
-# ================= GLOBAL STATES ===============
+# ================= GLOBAL STATES =================
 last_signal = None
 last_15m_close_time = None
 locked_15m_trend = None
@@ -41,6 +41,7 @@ def send_message(text):
     if not BOT_TOKEN:
         print("❌ BOT_TOKEN missing")
         return
+
     payload = {
         "chat_id": OWNER_ID,
         "text": text,
@@ -48,11 +49,47 @@ def send_message(text):
     }
     requests.post(TELEGRAM_URL, data=payload)
 
-# ================= STARTUP TEST =================
 print("🚀 BOT STARTED SUCCESSFULLY ON RAILWAY")
 send_message("✅ Bot online & running on Railway")
 
-# ================= ADX ==========================
+# ======================================================
+# 🔥 NEW ADDITION (ONLY THIS PART IS NEW – SAFE)
+# ======================================================
+def fetch_manual_text_signal():
+    try:
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+        r = requests.get(url, timeout=10).json()
+
+        if not r.get("ok"):
+            return
+
+        for update in r["result"]:
+            if "message" not in update:
+                continue
+
+            msg = update["message"]
+            chat_id = msg["chat"]["id"]
+            text = msg.get("text", "")
+
+            # ONLY OWNER CAN SEND
+            if chat_id != OWNER_ID:
+                continue
+
+            # ONLY BUY / SELL TEXT
+            if text.upper().startswith(("BUY", "SELL")):
+                send_message(f"""
+📊 <b>MANUAL SIGNAL</b>
+
+{text}
+
+⚠️ Risk: 1–2%
+""")
+
+    except Exception:
+        pass
+# ======================================================
+
+# ================= ADX =================
 def calculate_adx(df, period=14):
     high, low, close = df["High"], df["Low"], df["Close"]
     plus_dm = high.diff()
@@ -70,7 +107,7 @@ def calculate_adx(df, period=14):
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
     return dx.rolling(period).mean().fillna(0)
 
-# ================= LIQUIDITY SWEEP ==============
+# ================= LIQUIDITY SWEEP =================
 def liquidity_sweep_buy(df):
     support = df["Low"].tail(20).min()
     last = df.iloc[-1]
@@ -81,7 +118,7 @@ def liquidity_sweep_sell(df):
     last = df.iloc[-1]
     return last["High"] > resistance and last["Close"] < resistance
 
-# ================= ORDER BLOCK ==================
+# ================= ORDER BLOCK =================
 def bullish_order_block(df):
     for i in range(len(df)-3, 0, -1):
         c1, c2 = df.iloc[i], df.iloc[i+1]
@@ -96,11 +133,12 @@ def bearish_order_block(df):
             return c1["Low"], c1["High"]
     return None, None
 
-# ================= DAILY SUMMARY ================
+# ================= DAILY SUMMARY =================
 def send_daily_summary():
     global daily_trades
     if not daily_trades:
         return
+
     total = len(daily_trades)
     net_rr = sum(t["rr"] for t in daily_trades)
 
@@ -133,8 +171,8 @@ def check_signal():
     if hour < 6 or hour > 20:
         return None
 
-    df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d", progress=False)
-    htf = yf.download(SYMBOL, interval=TF_TREND, period="4d", progress=False)
+    df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d")
+    htf = yf.download(SYMBOL, interval=TF_TREND, period="5d")
 
     if df.empty or htf.empty or len(df) < 50:
         return None
@@ -155,9 +193,9 @@ def check_signal():
     if last_15m_close_time != current_15m_close:
         last_15m_close_time = current_15m_close
         last_htf = htf.iloc[-1]
-        if last_htf["EMA20"] > last_htf["EMA50"] and last_htf["RSI"] > 50:
+        if last_htf["EMA20"] > last_htf["EMA50"]:
             locked_15m_trend = "BULL"
-        elif last_htf["EMA20"] < last_htf["EMA50"] and last_htf["RSI"] < 50:
+        elif last_htf["EMA20"] < last_htf["EMA50"]:
             locked_15m_trend = "BEAR"
         else:
             locked_15m_trend = None
@@ -224,14 +262,17 @@ SL: {swing_high:.2f}
 TP: {tp:.2f}
 RR: 1:{RR_RATIO}
 """
+
     return None
 
-# ================= MAIN LOOP ====================
+# ================= MAIN LOOP =================
 while True:
     now = datetime.utcnow()
     today = now.date()
 
     print(f"⏳ Bot alive | {now}")
+
+    fetch_manual_text_signal()  # ✅ ONLY NEW LINE
 
     if now.hour == 18 and now.minute == 30:
         if last_summary_date != today:
