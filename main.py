@@ -8,7 +8,7 @@ import time
 import requests
 import pandas as pd
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timezone   # ✅ FIXED
 
 # ================= TOKEN PROTECTION =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -21,7 +21,6 @@ if not _valid_token(BOT_TOKEN):
 
 # ================= CONFIG =================
 OWNER_ID = 7140499311  # 🔒 HARD OWNER
-
 TELEGRAM_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
 SYMBOL = "XAUUSD=X"
@@ -32,7 +31,6 @@ TF_TREND = "15m"
 SLEEP_TIME = 300
 RR_RATIO = 2
 
-# 🔢 DAILY SIGNAL LIMIT
 MAX_SIGNALS_PER_DAY = 10
 signals_today = 0
 signals_date = None
@@ -126,13 +124,14 @@ def check_signal():
     global last_signal, last_15m_close_time, locked_15m_trend
     global signals_today, signals_date, daily_trades
 
+    now = datetime.now(timezone.utc)   # ✅ FIXED
+    hour = now.hour
+
     # ⏰ HARD TRADING HOURS LOCK (06–20 UTC)
-    hour = datetime.utcnow().hour
     if hour < 6 or hour > 20:
         return None
 
-    # 🔢 Reset daily counter
-    today = datetime.utcnow().date()
+    today = now.date()
     if signals_date != today:
         signals_date = today
         signals_today = 0
@@ -205,8 +204,8 @@ def check_signal():
         last_signal = "BUY"
         signals_today += 1
         daily_trades.append({"rr": RR_RATIO})
-
         tp = price + (price - swing_low) * RR_RATIO
+
         return f"""
 🟢 <b>BUY GOLD (XM)</b>
 Entry: {price:.2f}
@@ -230,8 +229,8 @@ Signals Today: {signals_today}/10
         last_signal = "SELL"
         signals_today += 1
         daily_trades.append({"rr": RR_RATIO})
-
         tp = price - (swing_high - price) * RR_RATIO
+
         return f"""
 🔴 <b>SELL GOLD (XM)</b>
 Entry: {price:.2f}
@@ -248,7 +247,8 @@ send_message("✅ Gold Signal Bot LIVE | Best Mode (06–20 UTC)")
 
 while True:
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)   # ✅ FIXED
+
         if now.hour == 18 and now.minute == 30:
             if last_summary_date != now.date():
                 send_daily_summary()
