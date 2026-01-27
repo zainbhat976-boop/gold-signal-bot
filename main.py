@@ -67,7 +67,39 @@ def calculate_adx(df, period=14):
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
     return dx.rolling(period).mean().fillna(0)
 
-# ================= AUTO TREND TEXT (ALWAYS TRADE) =================
+# ================= MANUAL DECISION (STRONG / WEAK TEXT ONLY) =================
+def manual_decision_text(last):
+    adx = float(last["ADX"])
+    price = float(last["Close"])
+
+    if last["EMA20"] > last["EMA50"]:
+        trend = "📈 BULLISH"
+    elif last["EMA20"] < last["EMA50"]:
+        trend = "📉 BEARISH"
+    else:
+        trend = "⚪ SIDEWAYS"
+
+    # SAME CONDITIONS – sirf wording strong ki
+    if adx >= 12 and abs(price - last["EMA20"]) / price < 0.004:
+        status = "✅ <b>TRADE</b>"
+        reason = "Strong trend & strong momentum confirmed (EMA aligned, ADX healthy)"
+        confidence = "<b>Confidence: HIGH</b>"
+    else:
+        status = "⏸️ <b>WAIT</b>"
+        reason = "Weak momentum / no strong confirmation (patience required)"
+        confidence = "<b>Confidence: LOW</b>"
+
+    return f"""
+📊 <b>MANUAL CHECK</b>
+Trend: {trend}
+ADX: {adx:.1f}
+
+Status: {status}
+Reason: {reason}
+{confidence}
+"""
+
+# ================= AUTO TREND TEXT (UNCHANGED – ALWAYS TRADE) =================
 def auto_trend_text(last, adx):
     trend = "📈 BULLISH" if last["EMA20"] > last["EMA50"] else "📉 BEARISH"
     return f"""
@@ -80,34 +112,8 @@ ADX: {adx:.1f}
 <b>Confidence: HIGH</b>
 """
 
-# ================= MANUAL TREND TEXT (WAIT / TRADE) =================
-def manual_trend_text(last, adx):
-    if last["EMA20"] > last["EMA50"]:
-        trend = "📈 BULLISH"
-    elif last["EMA20"] < last["EMA50"]:
-        trend = "📉 BEARISH"
-    else:
-        trend = "⚪ SIDEWAYS"
-
-    if adx >= 12:
-        recommendation = "✅ <b>RECOMMENDATION: TRADE</b>"
-        confidence = "<b>Confidence: HIGH</b>"
-    else:
-        recommendation = "⏸️ <b>RECOMMENDATION: WAIT</b>"
-        confidence = "<b>Confidence: LOW</b>"
-
-    return f"""
-📊 <b>Trend Info</b>
-Trend: {trend}
-EMA: 20 / 50
-ADX: {adx:.1f}
-
-{recommendation}
-{confidence}
-"""
-
-# ================= MANUAL TEXT SIGNAL =================
-def fetch_manual_text_signal():
+# ================= MANUAL TEXT SIGNAL WITH DECISION =================
+def fetch_manual_text_signal_with_decision():
     global last_update_id
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
@@ -134,19 +140,19 @@ def fetch_manual_text_signal():
             if text.upper().startswith(("BUY", "SELL")):
                 df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d")
                 if df.empty or len(df) < 50:
-                    trend_text = ""
+                    decision = ""
                 else:
                     df["EMA20"] = df["Close"].ewm(span=20).mean()
                     df["EMA50"] = df["Close"].ewm(span=50).mean()
                     df["ADX"] = calculate_adx(df)
                     last = df.iloc[-1]
-                    trend_text = manual_trend_text(last, float(last["ADX"]))
+                    decision = manual_decision_text(last)
 
                 send_message(f"""
-📊 <b>MANUAL SIGNAL</b>
+📩 <b>YOUR MESSAGE</b>
 
 {text}
-{trend_text}
+{decision}
 """)
     except Exception:
         pass
@@ -208,7 +214,7 @@ def check_signal():
         signals_today += 1
         tp = price + (price - swing_low) * RR_RATIO
         return f"""
-🟢 <b>BUY GOLD (XM)</b>
+🟢 <b>BUY GOLD (AUTO)</b>
 
 Entry: {price:.2f}
 SL: {swing_low:.2f}
@@ -227,7 +233,7 @@ TP: {tp:.2f}
         signals_today += 1
         tp = price - (swing_high - price) * RR_RATIO
         return f"""
-🔴 <b>SELL GOLD (XM)</b>
+🔴 <b>SELL GOLD (AUTO)</b>
 
 Entry: {price:.2f}
 SL: {swing_high:.2f}
@@ -239,7 +245,7 @@ TP: {tp:.2f}
 
 # ================= MAIN LOOP =================
 while True:
-    fetch_manual_text_signal()
+    fetch_manual_text_signal_with_decision()
 
     signal = check_signal()
     if signal:
