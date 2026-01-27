@@ -8,7 +8,7 @@ import time
 import requests
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -110,7 +110,7 @@ def check_signal():
     global last_signal, signals_today, signals_date, daily_trades
 
     # ===== India Forex Market Time (IST, 24x5) =====
-    now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
     weekday = now_ist.weekday()  # Mon=0, Sun=6
     hour = now_ist.hour
     minute = now_ist.minute
