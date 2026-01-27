@@ -30,8 +30,6 @@ signals_date = None
 
 # ================= GLOBAL STATES =================
 last_signal = None
-daily_trades = []
-last_summary_date = None
 
 # ================= MANUAL SIGNAL STATE =================
 last_update_id = 0
@@ -50,7 +48,65 @@ def send_message(text):
 print("🚀 BOT STARTED SUCCESSFULLY ON RAILWAY")
 send_message("✅ Bot online & running on Railway")
 
-# ================= MANUAL TEXT SIGNAL (NO DUPLICATE) =================
+# ================= ADX =================
+def calculate_adx(df, period=14):
+    high, low, close = df["High"], df["Low"], df["Close"]
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs()
+    ], axis=1).max(axis=1)
+
+    atr = tr.rolling(period).mean()
+    plus_dm = high.diff().clip(lower=0)
+    minus_dm = (-low.diff()).clip(lower=0)
+
+    plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
+    minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+    return dx.rolling(period).mean().fillna(0)
+
+# ================= AUTO TREND TEXT (ALWAYS TRADE) =================
+def auto_trend_text(last, adx):
+    trend = "📈 BULLISH" if last["EMA20"] > last["EMA50"] else "📉 BEARISH"
+    return f"""
+📊 <b>Trend Info</b>
+Trend: {trend}
+EMA: 20 / 50
+ADX: {adx:.1f}
+
+✅ <b>RECOMMENDATION: TRADE</b>
+<b>Confidence: HIGH</b>
+"""
+
+# ================= MANUAL TREND TEXT (WAIT / TRADE) =================
+def manual_trend_text(last, adx):
+    if last["EMA20"] > last["EMA50"]:
+        trend = "📈 BULLISH"
+    elif last["EMA20"] < last["EMA50"]:
+        trend = "📉 BEARISH"
+    else:
+        trend = "⚪ SIDEWAYS"
+
+    if adx >= 12:
+        recommendation = "✅ <b>RECOMMENDATION: TRADE</b>"
+        confidence = "<b>Confidence: HIGH</b>"
+    else:
+        recommendation = "⏸️ <b>RECOMMENDATION: WAIT</b>"
+        confidence = "<b>Confidence: LOW</b>"
+
+    return f"""
+📊 <b>Trend Info</b>
+Trend: {trend}
+EMA: 20 / 50
+ADX: {adx:.1f}
+
+{recommendation}
+{confidence}
+"""
+
+# ================= MANUAL TEXT SIGNAL =================
 def fetch_manual_text_signal():
     global last_update_id
     try:
@@ -76,42 +132,31 @@ def fetch_manual_text_signal():
                 continue
 
             if text.upper().startswith(("BUY", "SELL")):
+                df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d")
+                if df.empty or len(df) < 50:
+                    trend_text = ""
+                else:
+                    df["EMA20"] = df["Close"].ewm(span=20).mean()
+                    df["EMA50"] = df["Close"].ewm(span=50).mean()
+                    df["ADX"] = calculate_adx(df)
+                    last = df.iloc[-1]
+                    trend_text = manual_trend_text(last, float(last["ADX"]))
+
                 send_message(f"""
 📊 <b>MANUAL SIGNAL</b>
 
 {text}
-
-⚠️ Risk: 1–2%
+{trend_text}
 """)
     except Exception:
         pass
 
-# ================= ADX =================
-def calculate_adx(df, period=14):
-    high, low, close = df["High"], df["Low"], df["Close"]
-
-    tr = pd.concat([
-        high - low,
-        (high - close.shift()).abs(),
-        (low - close.shift()).abs()
-    ], axis=1).max(axis=1)
-
-    atr = tr.rolling(period).mean()
-    plus_dm = high.diff().clip(lower=0)
-    minus_dm = (-low.diff()).clip(lower=0)
-
-    plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
-    minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
-    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-    return dx.rolling(period).mean().fillna(0)
-
-# ================= AUTO SIGNAL LOGIC (BALANCED) =================
+# ================= AUTO SIGNAL LOGIC (UNCHANGED) =================
 def check_signal():
-    global last_signal, signals_today, signals_date, daily_trades
+    global last_signal, signals_today, signals_date
 
-    # ===== India Forex Market Time (IST, 24x5) =====
     now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
-    weekday = now_ist.weekday()  # Mon=0, Sun=6
+    weekday = now_ist.weekday()
     hour = now_ist.hour
     minute = now_ist.minute
 
@@ -152,7 +197,6 @@ def check_signal():
     swing_low = df["Low"].tail(20).min()
     swing_high = df["High"].tail(20).max()
 
-    # ===== BUY (ADX > 15) =====
     if (
         last["EMA20"] > last["EMA50"]
         and price > last["EMA20"]
@@ -163,20 +207,15 @@ def check_signal():
         last_signal = "BUY"
         signals_today += 1
         tp = price + (price - swing_low) * RR_RATIO
-        daily_trades.append({"rr": RR_RATIO})
         return f"""
 🟢 <b>BUY GOLD (XM)</b>
-
-Pair: {PAIR_NAME}
-TF: 5M
 
 Entry: {price:.2f}
 SL: {swing_low:.2f}
 TP: {tp:.2f}
-RR: 1:{RR_RATIO}
+{auto_trend_text(last, adx)}
 """
 
-    # ===== SELL (ADX > 15) =====
     if (
         last["EMA20"] < last["EMA50"]
         and price < last["EMA20"]
@@ -187,17 +226,13 @@ RR: 1:{RR_RATIO}
         last_signal = "SELL"
         signals_today += 1
         tp = price - (swing_high - price) * RR_RATIO
-        daily_trades.append({"rr": RR_RATIO})
         return f"""
 🔴 <b>SELL GOLD (XM)</b>
-
-Pair: {PAIR_NAME}
-TF: 5M
 
 Entry: {price:.2f}
 SL: {swing_high:.2f}
 TP: {tp:.2f}
-RR: 1:{RR_RATIO}
+{auto_trend_text(last, adx)}
 """
 
     return None
