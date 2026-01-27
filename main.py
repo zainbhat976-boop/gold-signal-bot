@@ -157,7 +157,7 @@ def check_signal():
         last["EMA20"] > last["EMA50"]
         and price > last["EMA20"]
         and 45 < rsi < 70
-        and adx > 15
+        and adx > 12
         and last_signal != "BUY"
     ):
         last_signal = "BUY"
@@ -181,7 +181,7 @@ RR: 1:{RR_RATIO}
         last["EMA20"] < last["EMA50"]
         and price < last["EMA20"]
         and 30 < rsi < 55
-        and adx > 15
+        and adx > 12
         and last_signal != "SELL"
     ):
         last_signal = "SELL"
