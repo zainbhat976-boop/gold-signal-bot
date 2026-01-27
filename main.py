@@ -30,6 +30,8 @@ signals_date = None
 
 # ================= GLOBAL STATES =================
 last_signal = None
+daily_trades = []
+last_summary_date = None
 
 # ================= MANUAL SIGNAL STATE =================
 last_update_id = 0
@@ -48,72 +50,32 @@ def send_message(text):
 print("🚀 BOT STARTED SUCCESSFULLY ON RAILWAY")
 send_message("✅ Bot online & running on Railway")
 
-# ================= ADX =================
-def calculate_adx(df, period=14):
-    high, low, close = df["High"], df["Low"], df["Close"]
+# =====================================================
+# ✅ DECISION LOGIC (ONLY NEW ADDITION)
+# =====================================================
+def trade_wait_decision(text, current_price):
+    try:
+        lines = text.splitlines()
+        entry_line = [l for l in lines if "entry" in l.lower()][0]
 
-    tr = pd.concat([
-        high - low,
-        (high - close.shift()).abs(),
-        (low - close.shift()).abs()
-    ], axis=1).max(axis=1)
+        clean = entry_line.replace("–", "-").replace("—", "-")
+        nums = [float(x) for x in clean.split() if x.replace(".", "").isdigit()]
 
-    atr = tr.rolling(period).mean()
-    plus_dm = high.diff().clip(lower=0)
-    minus_dm = (-low.diff()).clip(lower=0)
+        if len(nums) >= 2:
+            low = min(nums)
+            high = max(nums)
 
-    plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
-    minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
-    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-    return dx.rolling(period).mean().fillna(0)
+            if low <= current_price <= high:
+                return "✅ TRADE"
+            else:
+                return "⏳ WAIT"
+    except Exception:
+        pass
 
-# ================= MANUAL DECISION (STRONG / WEAK TEXT ONLY) =================
-def manual_decision_text(last):
-    adx = float(last["ADX"])
-    price = float(last["Close"])
+    return "⏳ WAIT"
 
-    if last["EMA20"] > last["EMA50"]:
-        trend = "📈 BULLISH"
-    elif last["EMA20"] < last["EMA50"]:
-        trend = "📉 BEARISH"
-    else:
-        trend = "⚪ SIDEWAYS"
-
-    # SAME CONDITIONS – sirf wording strong ki
-    if adx >= 12 and abs(price - last["EMA20"]) / price < 0.004:
-        status = "✅ <b>TRADE</b>"
-        reason = "Strong trend & strong momentum confirmed (EMA aligned, ADX healthy)"
-        confidence = "<b>Confidence: HIGH</b>"
-    else:
-        status = "⏸️ <b>WAIT</b>"
-        reason = "Weak momentum / no strong confirmation (patience required)"
-        confidence = "<b>Confidence: LOW</b>"
-
-    return f"""
-📊 <b>MANUAL CHECK</b>
-Trend: {trend}
-ADX: {adx:.1f}
-
-Status: {status}
-Reason: {reason}
-{confidence}
-"""
-
-# ================= AUTO TREND TEXT (UNCHANGED – ALWAYS TRADE) =================
-def auto_trend_text(last, adx):
-    trend = "📈 BULLISH" if last["EMA20"] > last["EMA50"] else "📉 BEARISH"
-    return f"""
-📊 <b>Trend Info</b>
-Trend: {trend}
-EMA: 20 / 50
-ADX: {adx:.1f}
-
-✅ <b>RECOMMENDATION: TRADE</b>
-<b>Confidence: HIGH</b>
-"""
-
-# ================= MANUAL TEXT SIGNAL WITH DECISION =================
-def fetch_manual_text_signal_with_decision():
+# ================= MANUAL TEXT SIGNAL (WITH DECISION) =================
+def fetch_manual_text_signal():
     global last_update_id
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
@@ -138,28 +100,48 @@ def fetch_manual_text_signal_with_decision():
                 continue
 
             if text.upper().startswith(("BUY", "SELL")):
-                df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d")
-                if df.empty or len(df) < 50:
-                    decision = ""
-                else:
-                    df["EMA20"] = df["Close"].ewm(span=20).mean()
-                    df["EMA50"] = df["Close"].ewm(span=50).mean()
-                    df["ADX"] = calculate_adx(df)
-                    last = df.iloc[-1]
-                    decision = manual_decision_text(last)
+                df = yf.download(SYMBOL, interval=TF_ENTRY, period="1d")
+                if df.empty:
+                    return
+
+                current_price = float(df["Close"].iloc[-1])
+                decision = trade_wait_decision(text, current_price)
 
                 send_message(f"""
-📩 <b>YOUR MESSAGE</b>
+📊 <b>MANUAL SIGNAL</b>
 
 {text}
-{decision}
+
+<b>Decision:</b> {decision}
+<b>Current Price:</b> {current_price:.2f}
+
+⚠️ Risk: 1–2%
 """)
     except Exception:
         pass
 
+# ================= ADX =================
+def calculate_adx(df, period=14):
+    high, low, close = df["High"], df["Low"], df["Close"]
+
+    tr = pd.concat([
+        high - low,
+        (high - close.shift()).abs(),
+        (low - close.shift()).abs()
+    ], axis=1).max(axis=1)
+
+    atr = tr.rolling(period).mean()
+    plus_dm = high.diff().clip(lower=0)
+    minus_dm = (-low.diff()).clip(lower=0)
+
+    plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
+    minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
+    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
+    return dx.rolling(period).mean().fillna(0)
+
 # ================= AUTO SIGNAL LOGIC (UNCHANGED) =================
 def check_signal():
-    global last_signal, signals_today, signals_date
+    global last_signal, signals_today, signals_date, daily_trades
 
     now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
     weekday = now_ist.weekday()
@@ -214,12 +196,12 @@ def check_signal():
         signals_today += 1
         tp = price + (price - swing_low) * RR_RATIO
         return f"""
-🟢 <b>BUY GOLD (AUTO)</b>
+🟢 <b>BUY GOLD (XM)</b>
 
 Entry: {price:.2f}
 SL: {swing_low:.2f}
 TP: {tp:.2f}
-{auto_trend_text(last, adx)}
+RR: 1:{RR_RATIO}
 """
 
     if (
@@ -233,19 +215,19 @@ TP: {tp:.2f}
         signals_today += 1
         tp = price - (swing_high - price) * RR_RATIO
         return f"""
-🔴 <b>SELL GOLD (AUTO)</b>
+🔴 <b>SELL GOLD (XM)</b>
 
 Entry: {price:.2f}
 SL: {swing_high:.2f}
 TP: {tp:.2f}
-{auto_trend_text(last, adx)}
+RR: 1:{RR_RATIO}
 """
 
     return None
 
 # ================= MAIN LOOP =================
 while True:
-    fetch_manual_text_signal_with_decision()
+    fetch_manual_text_signal()
 
     signal = check_signal()
     if signal:
