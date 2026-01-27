@@ -8,7 +8,7 @@ import time
 import requests
 import pandas as pd
 import yfinance as yf
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ================= CONFIG =================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -20,8 +20,7 @@ SYMBOL = "XAUUSD=X"
 PAIR_NAME = "XAUUSD"
 
 TF_ENTRY = "5m"
-TF_TREND = "15m"
-SLEEP_TIME = 300
+SLEEP_TIME = 60
 RR_RATIO = 2
 
 # ================= DAILY SIGNAL LIMIT =================
@@ -31,20 +30,16 @@ signals_date = None
 
 # ================= GLOBAL STATES =================
 last_signal = None
-last_15m_close_time = None
-locked_15m_trend = None
 daily_trades = []
 last_summary_date = None
 
-# 🔒 MANUAL SIGNAL STATE (NEW – SAFE)
+# ================= MANUAL SIGNAL STATE =================
 last_update_id = 0
 
 # ================= SEND MESSAGE =================
 def send_message(text):
     if not BOT_TOKEN:
-        print("❌ BOT_TOKEN missing")
         return
-
     payload = {
         "chat_id": OWNER_ID,
         "text": text,
@@ -55,27 +50,20 @@ def send_message(text):
 print("🚀 BOT STARTED SUCCESSFULLY ON RAILWAY")
 send_message("✅ Bot online & running on Railway")
 
-# ======================================================
-# 🔥 MANUAL TEXT SIGNAL (FIXED – NO DUPLICATE)
-# ======================================================
+# ================= MANUAL TEXT SIGNAL (NO DUPLICATE) =================
 def fetch_manual_text_signal():
     global last_update_id
-
     try:
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
         r = requests.get(url, timeout=10).json()
-
         if not r.get("ok"):
             return
 
         for update in r["result"]:
             update_id = update["update_id"]
-
-            # ❌ ignore already processed messages
             if update_id <= last_update_id:
                 continue
-
-            last_update_id = update_id  # ✅ mark processed
+            last_update_id = update_id
 
             if "message" not in update:
                 continue
@@ -84,11 +72,9 @@ def fetch_manual_text_signal():
             chat_id = msg["chat"]["id"]
             text = msg.get("text", "")
 
-            # ONLY OWNER
             if chat_id != OWNER_ID:
                 continue
 
-            # ONLY BUY / SELL
             if text.upper().startswith(("BUY", "SELL")):
                 send_message(f"""
 📊 <b>MANUAL SIGNAL</b>
@@ -97,15 +83,12 @@ def fetch_manual_text_signal():
 
 ⚠️ Risk: 1–2%
 """)
-
     except Exception:
         pass
 
 # ================= ADX =================
 def calculate_adx(df, period=14):
     high, low, close = df["High"], df["Low"], df["Close"]
-    plus_dm = high.diff()
-    minus_dm = low.diff().abs()
 
     tr = pd.concat([
         high - low,
@@ -114,64 +97,32 @@ def calculate_adx(df, period=14):
     ], axis=1).max(axis=1)
 
     atr = tr.rolling(period).mean()
+    plus_dm = high.diff().clip(lower=0)
+    minus_dm = (-low.diff()).clip(lower=0)
+
     plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
     minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
     return dx.rolling(period).mean().fillna(0)
 
-# ================= LIQUIDITY SWEEP =================
-def liquidity_sweep_buy(df):
-    support = df["Low"].tail(20).min()
-    last = df.iloc[-1]
-    return last["Low"] < support and last["Close"] > support
-
-def liquidity_sweep_sell(df):
-    resistance = df["High"].tail(20).max()
-    last = df.iloc[-1]
-    return last["High"] > resistance and last["Close"] < resistance
-
-# ================= ORDER BLOCK =================
-def bullish_order_block(df):
-    for i in range(len(df)-3, 0, -1):
-        c1, c2 = df.iloc[i], df.iloc[i+1]
-        if c1["Close"] < c1["Open"] and c2["Close"] > c2["Open"]:
-            return c1["Low"], c1["High"]
-    return None, None
-
-def bearish_order_block(df):
-    for i in range(len(df)-3, 0, -1):
-        c1, c2 = df.iloc[i], df.iloc[i+1]
-        if c1["Close"] > c1["Open"] and c2["Close"] < c2["Open"]:
-            return c1["Low"], c1["High"]
-    return None, None
-
-# ================= DAILY SUMMARY =================
-def send_daily_summary():
-    global daily_trades
-    if not daily_trades:
-        return
-
-    total = len(daily_trades)
-    net_rr = sum(t["rr"] for t in daily_trades)
-
-    msg = f"""
-📊 <b>DAILY SUMMARY (XM)</b>
-
-Pair: {PAIR_NAME}
-TF: 5M | 15M
-
-Total Signals: {total}
-Net RR: {net_rr}
-"""
-    send_message(msg)
-    daily_trades = []
-
-# ================= SIGNAL LOGIC =================
+# ================= AUTO SIGNAL LOGIC (BALANCED) =================
 def check_signal():
-    global last_signal, last_15m_close_time, locked_15m_trend
-    global daily_trades, signals_today, signals_date
+    global last_signal, signals_today, signals_date, daily_trades
 
-    today = datetime.utcnow().date()
+    # ===== India Forex Market Time (IST, 24x5) =====
+    now_ist = datetime.utcnow() + timedelta(hours=5, minutes=30)
+    weekday = now_ist.weekday()  # Mon=0, Sun=6
+    hour = now_ist.hour
+    minute = now_ist.minute
+
+    if weekday == 6:
+        return None
+    if weekday == 5 and (hour > 5 or (hour == 5 and minute >= 30)):
+        return None
+    if weekday == 0 and (hour < 5 or (hour == 5 and minute < 30)):
+        return None
+
+    today = now_ist.date()
     if signals_date != today:
         signals_date = today
         signals_today = 0
@@ -179,20 +130,12 @@ def check_signal():
     if signals_today >= MAX_SIGNALS_PER_DAY:
         return None
 
-    hour = datetime.utcnow().hour
-    if hour < 6 or hour > 20:
-        return None
-
     df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d")
-    htf = yf.download(SYMBOL, interval=TF_TREND, period="5d")
-
-    if df.empty or htf.empty or len(df) < 50:
+    if df.empty or len(df) < 50:
         return None
 
     df["EMA20"] = df["Close"].ewm(span=20).mean()
     df["EMA50"] = df["Close"].ewm(span=50).mean()
-    htf["EMA20"] = htf["Close"].ewm(span=20).mean()
-    htf["EMA50"] = htf["Close"].ewm(span=50).mean()
 
     delta = df["Close"].diff()
     gain = delta.where(delta > 0, 0).rolling(14).mean()
@@ -200,17 +143,6 @@ def check_signal():
     df["RSI"] = 100 - (100 / (1 + gain / loss))
 
     df["ADX"] = calculate_adx(df)
-
-    current_15m_close = htf.index[-1]
-    if last_15m_close_time != current_15m_close:
-        last_15m_close_time = current_15m_close
-        last_htf = htf.iloc[-1]
-        if last_htf["EMA20"] > last_htf["EMA50"]:
-            locked_15m_trend = "BULL"
-        elif last_htf["EMA20"] < last_htf["EMA50"]:
-            locked_15m_trend = "BEAR"
-        else:
-            locked_15m_trend = None
 
     last = df.iloc[-1]
     price = float(last["Close"])
@@ -220,17 +152,12 @@ def check_signal():
     swing_low = df["Low"].tail(20).min()
     swing_high = df["High"].tail(20).max()
 
-    ob_low_b, ob_high_b = bullish_order_block(df)
-    ob_low_s, ob_high_s = bearish_order_block(df)
-
+    # ===== BUY (ADX > 15) =====
     if (
-        locked_15m_trend == "BULL"
-        and liquidity_sweep_buy(df)
-        and ob_low_b and ob_low_b <= price <= ob_high_b
-        and last["EMA20"] > last["EMA50"]
+        last["EMA20"] > last["EMA50"]
         and price > last["EMA20"]
-        and 50 < rsi < 65
-        and adx > 20
+        and 45 < rsi < 70
+        and adx > 15
         and last_signal != "BUY"
     ):
         last_signal = "BUY"
@@ -241,7 +168,7 @@ def check_signal():
 🟢 <b>BUY GOLD (XM)</b>
 
 Pair: {PAIR_NAME}
-TF: 5M | Trend: 15M
+TF: 5M
 
 Entry: {price:.2f}
 SL: {swing_low:.2f}
@@ -249,14 +176,12 @@ TP: {tp:.2f}
 RR: 1:{RR_RATIO}
 """
 
+    # ===== SELL (ADX > 15) =====
     if (
-        locked_15m_trend == "BEAR"
-        and liquidity_sweep_sell(df)
-        and ob_low_s and ob_low_s <= price <= ob_high_s
-        and last["EMA20"] < last["EMA50"]
+        last["EMA20"] < last["EMA50"]
         and price < last["EMA20"]
-        and 35 < rsi < 50
-        and adx > 20
+        and 30 < rsi < 55
+        and adx > 15
         and last_signal != "SELL"
     ):
         last_signal = "SELL"
@@ -267,7 +192,7 @@ RR: 1:{RR_RATIO}
 🔴 <b>SELL GOLD (XM)</b>
 
 Pair: {PAIR_NAME}
-TF: 5M | Trend: 15M
+TF: 5M
 
 Entry: {price:.2f}
 SL: {swing_high:.2f}
@@ -279,17 +204,7 @@ RR: 1:{RR_RATIO}
 
 # ================= MAIN LOOP =================
 while True:
-    now = datetime.utcnow()
-    today = now.date()
-
-    print(f"⏳ Bot alive | {now}")
-
-    fetch_manual_text_signal()  # ✅ SAFE
-
-    if now.hour == 18 and now.minute == 30:
-        if last_summary_date != today:
-            send_daily_summary()
-            last_summary_date = today
+    fetch_manual_text_signal()
 
     signal = check_signal()
     if signal:
