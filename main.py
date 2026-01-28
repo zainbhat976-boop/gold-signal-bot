@@ -31,8 +31,6 @@ signals_date = None
 
 # ================= GLOBAL STATES =================
 last_signal = None
-daily_trades = []
-last_summary_date = None
 
 # ================= MANUAL SIGNAL STATE =================
 last_update_id = 0
@@ -58,7 +56,7 @@ def extract_value(text, key):
         return float(match.group(1))
     return None
 
-# ================= MARKET BIAS CHECK (NEW ADD) =================
+# ================= MARKET BIAS DECISION (NEW) =================
 def market_bias_decision(direction):
     df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d")
     if df.empty or len(df) < 50:
@@ -87,7 +85,7 @@ def market_bias_decision(direction):
 
     return "✅ TRADE OK\nMarket aapki direction ke saath hai"
 
-# ================= MANUAL TEXT SIGNAL (UPDATED) =================
+# ================= MANUAL TEXT SIGNAL =================
 def fetch_manual_text_signal():
     global last_update_id
     try:
