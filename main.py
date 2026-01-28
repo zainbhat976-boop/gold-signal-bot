@@ -1,8 +1,10 @@
-# ================= LOGGING OFF =================
+================= LOGGING OFF =================
+
 import logging
 logging.disable(logging.CRITICAL)
 
-# ================= IMPORTS =================
+================= IMPORTS =================
+
 import os
 import time
 import requests
@@ -11,7 +13,8 @@ import yfinance as yf
 import re
 from datetime import datetime, timedelta, timezone
 
-# ================= CONFIG =================
+================= CONFIG =================
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = 7140499311  # ONLY YOU
 
@@ -24,198 +27,181 @@ TF_ENTRY = "5m"
 SLEEP_TIME = 60
 RR_RATIO = 2
 
-# ================= DAILY SIGNAL LIMIT =================
+================= DAILY SIGNAL LIMIT =================
+
 MAX_SIGNALS_PER_DAY = 10
 signals_today = 0
 signals_date = None
 
-# ================= GLOBAL STATES =================
-last_signal = None
+================= GLOBAL STATES =================
 
-# ================= MANUAL SIGNAL STATE =================
+last_signal = None
+daily_trades = []
+last_summary_date = None
+
+================= MANUAL SIGNAL STATE =================
+
 last_update_id = 0
 
-# ================= SEND MESSAGE =================
+================= SEND MESSAGE =================
+
 def send_message(text):
-    if not BOT_TOKEN:
-        return
-    payload = {
-        "chat_id": OWNER_ID,
-        "text": text,
-        "parse_mode": "HTML"
-    }
-    requests.post(TELEGRAM_URL, data=payload)
+if not BOT_TOKEN:
+return
+payload = {
+"chat_id": OWNER_ID,
+"text": text,
+"parse_mode": "HTML"
+}
+requests.post(TELEGRAM_URL, data=payload)
 
 print("🚀 BOT STARTED SUCCESSFULLY ON RAILWAY")
 send_message("✅ Bot online & running on Railway")
 
-# ================= VALUE EXTRACTOR =================
+================= VALUE EXTRACTOR =================
+
 def extract_value(text, key):
-    match = re.search(rf"{key}\s*:\s*([\d\.]+)", text)
-    if match:
-        return float(match.group(1))
-    return None
+match = re.search(rf"{key}\s*:\s*([\d.]+)", text)
+if match:
+return float(match.group(1))
+return None
 
-# ================= MARKET BIAS DECISION (NEW) =================
-def market_bias_decision(direction):
-    df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d")
-    if df.empty or len(df) < 50:
-        return "⚠️ Market data unavailable"
+================= MANUAL TEXT SIGNAL (FIXED & SAFE) =================
 
-    df["EMA20"] = df["Close"].ewm(span=20).mean()
-    df["EMA50"] = df["Close"].ewm(span=50).mean()
-
-    delta = df["Close"].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(14).mean()
-    rsi = 100 - (100 / (1 + gain / loss))
-
-    ema20 = df["EMA20"].iloc[-1]
-    ema50 = df["EMA50"].iloc[-1]
-    rsi_last = float(rsi.iloc[-1])
-
-    bullish = ema20 > ema50 and rsi_last > 55
-    bearish = ema20 < ema50 and rsi_last < 45
-
-    if direction == "BUY" and bearish:
-        return "❌ BUY MAT LO\n📉 Price neeche ja sakta hai"
-
-    if direction == "SELL" and bullish:
-        return "❌ SELL MAT LO\n📈 Price upar ja sakta hai"
-
-    return "✅ TRADE OK\nMarket aapki direction ke saath hai"
-
-# ================= MANUAL TEXT SIGNAL =================
 def fetch_manual_text_signal():
-    global last_update_id
-    try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-        r = requests.get(url, timeout=10).json()
-        if not r.get("ok"):
-            return
+global last_update_id
+try:
+url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
+r = requests.get(url, timeout=10).json()
+if not r.get("ok"):
+return
 
-        for update in r["result"]:
-            update_id = update["update_id"]
-            if update_id <= last_update_id:
-                continue
-            last_update_id = update_id
+for update in r["result"]:  
+        update_id = update["update_id"]  
+        if update_id <= last_update_id:  
+            continue  
+        last_update_id = update_id  
 
-            if "message" not in update:
-                continue
+        if "message" not in update:  
+            continue  
 
-            msg = update["message"]
-            chat_id = msg["chat"]["id"]
-            text = msg.get("text", "")
+        msg = update["message"]  
+        chat_id = msg["chat"]["id"]  
+        text = msg.get("text", "")  
 
-            if chat_id != OWNER_ID:
-                continue
+        if chat_id != OWNER_ID:  
+            continue  
 
-            text_upper = text.upper()
-            text_lower = text.lower()
+        text_upper = text.upper()  
+        text_lower = text.lower()  
 
-            if not text_upper.startswith(("BUY", "SELL")):
-                continue
+        # ONLY BUY / SELL MESSAGES  
+        if not text_upper.startswith(("BUY", "SELL")):  
+            continue  
 
-            price = extract_value(text_lower, "price")
-            entry = extract_value(text_lower, "entry")
+        price = extract_value(text_lower, "price")  
+        entry = extract_value(text_lower, "entry")  
 
-            direction = "BUY" if text_upper.startswith("BUY") else "SELL"
+        if price is None or entry is None:  
+            recommendation = "⚠️ INVALID FORMAT (use: price: xxxx entry: xxxx)"  
+        else:  
+            if price > entry:  
+                recommendation = "⏳ WAIT (price above entry)"  
+            else:  
+                recommendation = "✅ TRADE"  
 
-            if price is None or entry is None:
-                decision = "⚠️ FORMAT GALAT\nUse: price: xxxx entry: xxxx"
-            else:
-                decision = market_bias_decision(direction)
+        send_message(f"""
 
-            send_message(f"""
-📊 <b>MANUAL CHECK</b>
+📊 <b>MANUAL SIGNAL</b>
 
 {text}
 
-<b>Decision:</b>
-{decision}
-
+<b>Recommendation:</b> {recommendation}
 ⚠️ Risk: 1–2%
 """)
 
-    except Exception:
-        pass
+except Exception:  
+    pass
 
-# ================= ADX =================
+================= ADX =================
+
 def calculate_adx(df, period=14):
-    high, low, close = df["High"], df["Low"], df["Close"]
+high, low, close = df["High"], df["Low"], df["Close"]
 
-    tr = pd.concat([
-        high - low,
-        (high - close.shift()).abs(),
-        (low - close.shift()).abs()
-    ], axis=1).max(axis=1)
+tr = pd.concat([  
+    high - low,  
+    (high - close.shift()).abs(),  
+    (low - close.shift()).abs()  
+], axis=1).max(axis=1)  
 
-    atr = tr.rolling(period).mean()
-    plus_dm = high.diff().clip(lower=0)
-    minus_dm = (-low.diff()).clip(lower=0)
+atr = tr.rolling(period).mean()  
+plus_dm = high.diff().clip(lower=0)  
+minus_dm = (-low.diff()).clip(lower=0)  
 
-    plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
-    minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
-    dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
-    return dx.rolling(period).mean().fillna(0)
+plus_di = 100 * (plus_dm.rolling(period).mean() / atr)  
+minus_di = 100 * (minus_dm.rolling(period).mean() / atr)  
+dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100  
+return dx.rolling(period).mean().fillna(0)
 
-# ================= AUTO SIGNAL LOGIC (UNCHANGED) =================
+================= AUTO SIGNAL LOGIC (UNCHANGED) =================
+
 def check_signal():
-    global last_signal, signals_today, signals_date
+global last_signal, signals_today, signals_date
 
-    now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
-    weekday = now_ist.weekday()
-    hour = now_ist.hour
-    minute = now_ist.minute
+now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)  
+weekday = now_ist.weekday()  
+hour = now_ist.hour  
+minute = now_ist.minute  
 
-    if weekday == 6:
-        return None
-    if weekday == 5 and (hour > 5 or (hour == 5 and minute >= 30)):
-        return None
-    if weekday == 0 and (hour < 5 or (hour == 5 and minute < 30)):
-        return None
+if weekday == 6:  
+    return None  
+if weekday == 5 and (hour > 5 or (hour == 5 and minute >= 30)):  
+    return None  
+if weekday == 0 and (hour < 5 or (hour == 5 and minute < 30)):  
+    return None  
 
-    today = now_ist.date()
-    if signals_date != today:
-        signals_date = today
-        signals_today = 0
+today = now_ist.date()  
+if signals_date != today:  
+    signals_date = today  
+    signals_today = 0  
 
-    if signals_today >= MAX_SIGNALS_PER_DAY:
-        return None
+if signals_today >= MAX_SIGNALS_PER_DAY:  
+    return None  
 
-    df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d")
-    if df.empty or len(df) < 50:
-        return None
+df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d")  
+if df.empty or len(df) < 50:  
+    return None  
 
-    df["EMA20"] = df["Close"].ewm(span=20).mean()
-    df["EMA50"] = df["Close"].ewm(span=50).mean()
+df["EMA20"] = df["Close"].ewm(span=20).mean()  
+df["EMA50"] = df["Close"].ewm(span=50).mean()  
 
-    delta = df["Close"].diff()
-    gain = delta.where(delta > 0, 0).rolling(14).mean()
-    loss = -delta.where(delta < 0, 0).rolling(14).mean()
-    df["RSI"] = 100 - (100 / (1 + gain / loss))
+delta = df["Close"].diff()  
+gain = delta.where(delta > 0, 0).rolling(14).mean()  
+loss = -delta.where(delta < 0, 0).rolling(14).mean()  
+df["RSI"] = 100 - (100 / (1 + gain / loss))  
 
-    df["ADX"] = calculate_adx(df)
+df["ADX"] = calculate_adx(df)  
 
-    last = df.iloc[-1]
-    price = float(last["Close"])
-    rsi = float(last["RSI"])
-    adx = float(last["ADX"])
+last = df.iloc[-1]  
+price = float(last["Close"])  
+rsi = float(last["RSI"])  
+adx = float(last["ADX"])  
 
-    swing_low = df["Low"].tail(20).min()
-    swing_high = df["High"].tail(20).max()
+swing_low = df["Low"].tail(20).min()  
+swing_high = df["High"].tail(20).max()  
 
-    if (
-        last["EMA20"] > last["EMA50"]
-        and price > last["EMA20"]
-        and 45 < rsi < 70
-        and adx > 12
-        and last_signal != "BUY"
-    ):
-        last_signal = "BUY"
-        signals_today += 1
-        tp = price + (price - swing_low) * RR_RATIO
-        return f"""
+if (  
+    last["EMA20"] > last["EMA50"]  
+    and price > last["EMA20"]  
+    and 45 < rsi < 70  
+    and adx > 12  
+    and last_signal != "BUY"  
+):  
+    last_signal = "BUY"  
+    signals_today += 1  
+    tp = price + (price - swing_low) * RR_RATIO  
+    return f"""
+
 🟢 <b>BUY GOLD (AUTO)</b>
 
 Entry: {price:.2f}
@@ -224,17 +210,18 @@ TP: {tp:.2f}
 RR: 1:{RR_RATIO}
 """
 
-    if (
-        last["EMA20"] < last["EMA50"]
-        and price < last["EMA20"]
-        and 30 < rsi < 55
-        and adx > 12
-        and last_signal != "SELL"
-    ):
-        last_signal = "SELL"
-        signals_today += 1
-        tp = price - (swing_high - price) * RR_RATIO
-        return f"""
+if (  
+    last["EMA20"] < last["EMA50"]  
+    and price < last["EMA20"]  
+    and 30 < rsi < 55  
+    and adx > 12  
+    and last_signal != "SELL"  
+):  
+    last_signal = "SELL"  
+    signals_today += 1  
+    tp = price - (swing_high - price) * RR_RATIO  
+    return f"""
+
 🔴 <b>SELL GOLD (AUTO)</b>
 
 Entry: {price:.2f}
@@ -243,14 +230,15 @@ TP: {tp:.2f}
 RR: 1:{RR_RATIO}
 """
 
-    return None
+return None
 
-# ================= MAIN LOOP =================
+================= MAIN LOOP =================
+
 while True:
-    fetch_manual_text_signal()
+fetch_manual_text_signal()
 
-    signal = check_signal()
-    if signal:
-        send_message(signal)
+signal = check_signal()  
+if signal:  
+    send_message(signal)  
 
-    time.sleep(SLEEP_TIME)
+time.sleep(SLEEP_TIME
