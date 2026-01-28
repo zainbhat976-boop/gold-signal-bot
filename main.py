@@ -21,7 +21,7 @@ SYMBOL = "XAUUSD=X"
 PAIR_NAME = "XAUUSD"
 
 TF_ENTRY = "5m"
-SLEEP_TIME = 60
+SLEEP_TIME = 30
 RR_RATIO = 2
 
 # ================= DAILY SIGNAL LIMIT =================
