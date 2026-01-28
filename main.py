@@ -84,8 +84,10 @@ def fetch_manual_text_signal():
             if chat_id != OWNER_ID:
                 continue
 
-            if not text_upper := text.upper().startswith(("BUY", "SELL")):
-                continue
+            text_upper = text.upper()
+
+if not text_upper.startswith(("BUY", "SELL")):
+    continue
 
             price = extract_value(text_lower, "price")
             entry = extract_value(text_lower, "entry")
