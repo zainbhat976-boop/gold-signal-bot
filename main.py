@@ -51,14 +51,14 @@ def send_message(text):
 print("🚀 BOT STARTED SUCCESSFULLY ON RAILWAY")
 send_message("✅ Bot online & running on Railway")
 
-# ================= VALUE EXTRACTOR (FIX) =================
+# ================= VALUE EXTRACTOR =================
 def extract_value(text, key):
-    match = re.search(rf"{key}\s*:\s*([\d\.]+)", text.lower())
+    match = re.search(rf"{key}\s*:\s*([\d\.]+)", text)
     if match:
         return float(match.group(1))
     return None
 
-# ================= MANUAL TEXT SIGNAL (WITH DECISION) =================
+# ================= MANUAL TEXT SIGNAL (FIXED & SAFE) =================
 def fetch_manual_text_signal():
     global last_update_id
     try:
@@ -79,27 +79,27 @@ def fetch_manual_text_signal():
             msg = update["message"]
             chat_id = msg["chat"]["id"]
             text = msg.get("text", "")
-            text_lower = text.lower()
 
             if chat_id != OWNER_ID:
                 continue
 
             text_upper = text.upper()
+            text_lower = text.lower()
 
-if not text_upper.startswith(("BUY", "SELL")):
-    continue
+            # ONLY BUY / SELL MESSAGES
+            if not text_upper.startswith(("BUY", "SELL")):
+                continue
 
             price = extract_value(text_lower, "price")
             entry = extract_value(text_lower, "entry")
 
-            recommendation = ""
-            if price is not None and entry is not None:
+            if price is None or entry is None:
+                recommendation = "⚠️ INVALID FORMAT (use: price: xxxx entry: xxxx)"
+            else:
                 if price > entry:
                     recommendation = "⏳ WAIT (price above entry)"
                 else:
                     recommendation = "✅ TRADE"
-            else:
-                recommendation = "⚠️ INVALID FORMAT"
 
             send_message(f"""
 📊 <b>MANUAL SIGNAL</b>
@@ -134,7 +134,7 @@ def calculate_adx(df, period=14):
 
 # ================= AUTO SIGNAL LOGIC (UNCHANGED) =================
 def check_signal():
-    global last_signal, signals_today, signals_date, daily_trades
+    global last_signal, signals_today, signals_date
 
     now_ist = datetime.now(timezone.utc) + timedelta(hours=5, minutes=30)
     weekday = now_ist.weekday()
