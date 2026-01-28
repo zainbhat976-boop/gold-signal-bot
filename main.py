@@ -58,7 +58,36 @@ def extract_value(text, key):
         return float(match.group(1))
     return None
 
-# ================= MANUAL TEXT SIGNAL (FIXED & SAFE) =================
+# ================= MARKET BIAS CHECK (NEW ADD) =================
+def market_bias_decision(direction):
+    df = yf.download(SYMBOL, interval=TF_ENTRY, period="2d")
+    if df.empty or len(df) < 50:
+        return "⚠️ Market data unavailable"
+
+    df["EMA20"] = df["Close"].ewm(span=20).mean()
+    df["EMA50"] = df["Close"].ewm(span=50).mean()
+
+    delta = df["Close"].diff()
+    gain = delta.where(delta > 0, 0).rolling(14).mean()
+    loss = -delta.where(delta < 0, 0).rolling(14).mean()
+    rsi = 100 - (100 / (1 + gain / loss))
+
+    ema20 = df["EMA20"].iloc[-1]
+    ema50 = df["EMA50"].iloc[-1]
+    rsi_last = float(rsi.iloc[-1])
+
+    bullish = ema20 > ema50 and rsi_last > 55
+    bearish = ema20 < ema50 and rsi_last < 45
+
+    if direction == "BUY" and bearish:
+        return "❌ BUY MAT LO\n📉 Price neeche ja sakta hai"
+
+    if direction == "SELL" and bullish:
+        return "❌ SELL MAT LO\n📈 Price upar ja sakta hai"
+
+    return "✅ TRADE OK\nMarket aapki direction ke saath hai"
+
+# ================= MANUAL TEXT SIGNAL (UPDATED) =================
 def fetch_manual_text_signal():
     global last_update_id
     try:
@@ -86,27 +115,27 @@ def fetch_manual_text_signal():
             text_upper = text.upper()
             text_lower = text.lower()
 
-            # ONLY BUY / SELL MESSAGES
             if not text_upper.startswith(("BUY", "SELL")):
                 continue
 
             price = extract_value(text_lower, "price")
             entry = extract_value(text_lower, "entry")
 
+            direction = "BUY" if text_upper.startswith("BUY") else "SELL"
+
             if price is None or entry is None:
-                recommendation = "⚠️ INVALID FORMAT (use: price: xxxx entry: xxxx)"
+                decision = "⚠️ FORMAT GALAT\nUse: price: xxxx entry: xxxx"
             else:
-                if price > entry:
-                    recommendation = "⏳ WAIT (price above entry)"
-                else:
-                    recommendation = "✅ TRADE"
+                decision = market_bias_decision(direction)
 
             send_message(f"""
-📊 <b>MANUAL SIGNAL</b>
+📊 <b>MANUAL CHECK</b>
 
 {text}
 
-<b>Recommendation:</b> {recommendation}
+<b>Decision:</b>
+{decision}
+
 ⚠️ Risk: 1–2%
 """)
 
